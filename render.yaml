@@ -3,7 +3,7 @@ services:
     name: clil-lessonplan-generator
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app_lessonplan:app
+    startCommand: gunicorn app:app
     envVars:
       - key: OPENAI_API_KEY
         sync: false
