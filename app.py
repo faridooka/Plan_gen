@@ -6,11 +6,12 @@ import os
 from docx import Document
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})  # Барлық доменге рұқсат береміз
 
+# 🔑 OpenAI API кілтін орнату
 openai.api_key = os.environ.get("OPENAI_API_KEY")
 
-# Prompt template for CLIL Lesson Plan
+# 💡 CLIL жоспар жасауға арналған prompt
 def build_prompt(topic, subject, grade, language_level, bloom_level):
     return f"""
 You are a CLIL lesson planner for school teachers in Kazakhstan.
@@ -37,30 +38,34 @@ Sections to include:
 - ICT used
 - Resources (include specific useful websites, tools, programs, and platforms with names and links that teachers can visit directly to use in class)
 
-Output format must be a clean textual table with each row representing a section."""
+Output format must be a clean textual table with each row representing a section.
+"""
 
 @app.route("/generate_lessonplan", methods=["POST"])
 def generate_lessonplan():
-    data = request.json
-    topic = data.get("topic", "")
-    subject = data.get("subject", "")
-    grade = data.get("grade", "")
-    language_level = data.get("language_level", "")
-    bloom_level = data.get("bloom_level", "")
+    try:
+        data = request.json
+        topic = data.get("topic", "")
+        subject = data.get("subject", "")
+        grade = data.get("grade", "")
+        language_level = data.get("language_level", "")
+        bloom_level = data.get("bloom_level", "")
 
-    prompt = build_prompt(topic, subject, grade, language_level, bloom_level)
+        prompt = build_prompt(topic, subject, grade, language_level, bloom_level)
 
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": "You are a CLIL methodology expert generating professional lesson plans."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.7
-    )
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a CLIL methodology expert generating professional lesson plans."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7
+        )
 
-    result = response.choices[0].message["content"]
-    return jsonify({"lesson_plan": result})
+        result = response.choices[0].message["content"]
+        return jsonify({"lesson_plan": result})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/download_lessonplan_docx", methods=["POST"])
 def download_lessonplan_docx():
@@ -94,8 +99,7 @@ def download_lessonplan_pdf():
     text_obj = c.beginText(50, y)
     text_obj.setFont("Helvetica", 12)
 
-    max_chars = 100  # предел символов в строке
-
+    max_chars = 100
     for line in lines:
         wrapped = [line[i:i+max_chars] for i in range(0, len(line), max_chars)]
         for part in wrapped:
@@ -110,5 +114,9 @@ def download_lessonplan_pdf():
 
     c.drawText(text_obj)
     c.save()
-
     return send_file(temp_file.name, as_attachment=True, download_name="lesson_plan.pdf")
+
+# 🔴 Барлық қателерді көрсету үшін:
+@app.errorhandler(Exception)
+def handle_error(e):
+    return jsonify({"error": str(e)}), 500
