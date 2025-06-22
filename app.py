@@ -3,16 +3,17 @@ from flask_cors import CORS
 import tempfile
 import os
 from docx import Document
-import openai
+from openai import OpenAI
 
 app = Flask(__name__)
-CORS(app)
 
-# OpenAI 1.0.0+ үшін дұрыс инициализация
-from openai import OpenAI
+# ❗ Тек cliledu.kz сайтын рұқсат ету
+CORS(app, resources={r"/*": {"origins": "https://cliledu.kz"}})
+
+# 🔑 OpenAI клиенті
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-# CLIL сабақ жоспарының промпт құрылымы
+# 📘 Сабақ жоспары үшін промпт
 def build_prompt(topic, subject, grade, language_level, bloom_level):
     return f"""
 You are a CLIL lesson planner for school teachers in Kazakhstan.
@@ -42,14 +43,15 @@ Sections to include:
 Output format must be a clean textual table with each row representing a section.
 """
 
+# 📩 Генерация маршруты
 @app.route("/generate_lessonplan", methods=["POST"])
 def generate_lessonplan():
     data = request.json
     topic = data.get("topic", "")
-    subject = data.get("subject", "")
     grade = data.get("grade", "")
     language_level = data.get("language_level", "")
     bloom_level = data.get("bloom_level", "")
+    subject = "Informatics"  # ❗ Автоматты түрде пән
 
     prompt = build_prompt(topic, subject, grade, language_level, bloom_level)
 
@@ -66,6 +68,7 @@ def generate_lessonplan():
     return jsonify({"lesson_plan": result})
 
 
+# 📥 DOCX файл ретінде сақтау
 @app.route("/download_lessonplan_docx", methods=["POST"])
 def download_lessonplan_docx():
     data = request.json
@@ -79,6 +82,7 @@ def download_lessonplan_docx():
     return send_file(temp_file.name, as_attachment=True, download_name="lesson_plan.docx")
 
 
+# 📥 PDF файл ретінде сақтау
 @app.route("/download_lessonplan_pdf", methods=["POST"])
 def download_lessonplan_pdf():
     from reportlab.pdfgen import canvas
