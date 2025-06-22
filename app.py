@@ -3,6 +3,8 @@ from flask_cors import CORS
 import tempfile
 import os
 from docx import Document
+from docx.shared import Pt
+from docx.oxml.ns import qn
 import openai
 
 app = Flask(__name__)
@@ -12,12 +14,12 @@ CORS(app)
 from openai import OpenAI
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-# CLIL сабақ жоспарының промпт құрылымы
+
 def build_prompt(topic, subject, grade, language_level, bloom_level):
     return f"""
 You are a CLIL lesson planner for school teachers in Kazakhstan.
 
-Create a full CLIL-based lesson plan for the subject \"{subject}\" on the topic \"{topic}\" for Grade {grade} students.
+Create a full CLIL-based lesson plan for the subject "{subject}" on the topic "{topic}" for Grade {grade} students.
 The learners' English level is {language_level}, and the cognitive focus should be based on Bloom's level: {bloom_level}.
 
 The lesson plan must be structured as a 2-column table:
@@ -39,14 +41,15 @@ Sections to include:
 - ICT used
 - Resources (include specific useful websites, tools, programs, and platforms with names and links that teachers can visit directly to use in class)
 
-Output format must be a clean textual table with each row representing a section.
+Output format must be a clean textual table with each row representing a section, using ":" between section name and content.
 """
+
 
 @app.route("/generate_lessonplan", methods=["POST"])
 def generate_lessonplan():
     data = request.json
     topic = data.get("topic", "")
-    subject = data.get("subject", "")
+    subject = data.get("subject", "Informatics")  # Үнемі "Informatics"
     grade = data.get("grade", "")
     language_level = data.get("language_level", "")
     bloom_level = data.get("bloom_level", "")
@@ -71,9 +74,27 @@ def download_lessonplan_docx():
     data = request.json
     content = data.get("lesson_plan", "")
     doc = Document()
-    doc.add_heading("CLIL Lesson Plan", level=1)
-    for line in content.split('\n'):
-        doc.add_paragraph(line)
+    
+    # Ортақ стиль орнату (Қаріп, өлшем)
+    style = doc.styles['Normal']
+    font = style.font
+    font.name = 'Times New Roman'
+    font.size = Pt(12)
+    # Қазақша үшін қаріпті орнату (қажет болса)
+    style.element.rPr.rFonts.set(qn('w:eastAsia'), 'Times New Roman')
+
+    doc.add_heading("CLIL Сабақ жоспары", level=1)
+
+    table = doc.add_table(rows=0, cols=2)
+    table.style = 'Table Grid'
+
+    for line in content.strip().split('\n'):
+        if ':' in line:
+            col1, col2 = line.split(':', 1)
+            row_cells = table.add_row().cells
+            row_cells[0].text = col1.strip()
+            row_cells[1].text = col2.strip()
+    
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
     doc.save(temp_file.name)
     return send_file(temp_file.name, as_attachment=True, download_name="lesson_plan.docx")
@@ -83,35 +104,66 @@ def download_lessonplan_docx():
 def download_lessonplan_pdf():
     from reportlab.pdfgen import canvas
     from reportlab.lib.pagesizes import letter
+    from reportlab.lib.units import mm
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib import colors
 
     data = request.json
     content = data.get("lesson_plan", "")
 
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-    c = canvas.Canvas(temp_file.name, pagesize=letter)
 
-    width, height = letter
-    y = height - 50
+    # Параққа тақырыпты қою
+    doc = SimpleDocTemplate(temp_file.name, pagesize=letter,
+                            rightMargin=20, leftMargin=20,
+                            topMargin=20, bottomMargin=20)
+    styles = getSampleStyleSheet()
+    normal_style = styles["Normal"]
+    normal_style.fontName = "Helvetica"
+    normal_style.fontSize = 11
+    normal_style.leading = 14
 
-    c.setFont("Helvetica", 12)
-    lines = content.split("\n")
+    elements = []
 
-    text_obj = c.beginText(50, y)
-    text_obj.setFont("Helvetica", 12)
+    # Тақырып
+    elements.append(Paragraph("CLIL Сабақ жоспары", styles["Title"]))
+    elements.append(Spacer(1, 12))
 
-    max_chars = 100
-    for line in lines:
-        wrapped = [line[i:i+max_chars] for i in range(0, len(line), max_chars)]
-        for part in wrapped:
-            text_obj.textLine(part)
-            y -= 15
-            if y < 50:
-                c.drawText(text_obj)
-                c.showPage()
-                y = height - 50
-                text_obj = c.beginText(50, y)
-                text_obj.setFont("Helvetica", 12)
+    # Кестеге мәтінді бөлшектеу
+    data_table = []
+    for line in content.strip().split('\n'):
+        if ':' in line:
+            col1, col2 = line.split(':', 1)
+            data_table.append([col1.strip(), col2.strip()])
+        else:
+            # Егер жолда ':' болмаса, жайша бөлек параграф қосуға болады
+            data_table.append([line.strip(), ""])
 
-    c.drawText(text_obj)
-    c.save()
+    table_style = TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('INNERGRID', (0, 0), (-1, -1), 0.25, colors.grey),
+        ('BOX', (0, 0), (-1, -1), 0.25, colors.grey),
+        ('LEFTPADDING', (0, 0), (-1, -1), 6),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+    ])
+
+    table = Table(data_table, colWidths=[100*mm, 80*mm])
+    table.setStyle(table_style)
+
+    elements.append(table)
+
+    doc.build(elements)
+
     return send_file(temp_file.name, as_attachment=True, download_name="lesson_plan.pdf")
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
