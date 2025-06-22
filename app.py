@@ -1,24 +1,27 @@
 from flask import Flask, request, jsonify, send_file
-from flask_cors import CORS
+from flask_cors import CORS, cross_origin
 import tempfile
 import os
 from docx import Document
-from openai import OpenAI
+import openai
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
 
 app = Flask(__name__)
 
-# ❗ Тек cliledu.kz сайтын рұқсат ету
-CORS(app, resources={r"/*": {"origins": "https://cliledu.kz"}})
+# ❗️CORS — тек нақты сайтқа рұқсат
+CORS(app, origins=["https://cliledu.kz"])
 
-# 🔑 OpenAI клиенті
+# ✅ OpenAI клиенті (openai>=1.0.0 үшін)
+from openai import OpenAI
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-# 📘 Сабақ жоспары үшін промпт
-def build_prompt(topic, subject, grade, language_level, bloom_level):
+# 🔧 Промпт құрастыру: тек Информатика пәні үшін
+def build_prompt(topic, grade, language_level, bloom_level):
     return f"""
 You are a CLIL lesson planner for school teachers in Kazakhstan.
 
-Create a full CLIL-based lesson plan for the subject \"{subject}\" on the topic \"{topic}\" for Grade {grade} students.
+Create a full CLIL-based lesson plan for the subject "Informatics" on the topic "{topic}" for Grade {grade} students.
 The learners' English level is {language_level}, and the cognitive focus should be based on Bloom's level: {bloom_level}.
 
 The lesson plan must be structured as a 2-column table:
@@ -43,17 +46,16 @@ Sections to include:
 Output format must be a clean textual table with each row representing a section.
 """
 
-# 📩 Генерация маршруты
 @app.route("/generate_lessonplan", methods=["POST"])
+@cross_origin(origins="https://cliledu.kz")
 def generate_lessonplan():
     data = request.json
     topic = data.get("topic", "")
     grade = data.get("grade", "")
     language_level = data.get("language_level", "")
     bloom_level = data.get("bloom_level", "")
-    subject = "Informatics"  # ❗ Автоматты түрде пән
 
-    prompt = build_prompt(topic, subject, grade, language_level, bloom_level)
+    prompt = build_prompt(topic, grade, language_level, bloom_level)
 
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
@@ -68,8 +70,8 @@ def generate_lessonplan():
     return jsonify({"lesson_plan": result})
 
 
-# 📥 DOCX файл ретінде сақтау
 @app.route("/download_lessonplan_docx", methods=["POST"])
+@cross_origin(origins="https://cliledu.kz")
 def download_lessonplan_docx():
     data = request.json
     content = data.get("lesson_plan", "")
@@ -82,24 +84,19 @@ def download_lessonplan_docx():
     return send_file(temp_file.name, as_attachment=True, download_name="lesson_plan.docx")
 
 
-# 📥 PDF файл ретінде сақтау
 @app.route("/download_lessonplan_pdf", methods=["POST"])
+@cross_origin(origins="https://cliledu.kz")
 def download_lessonplan_pdf():
-    from reportlab.pdfgen import canvas
-    from reportlab.lib.pagesizes import letter
-
     data = request.json
     content = data.get("lesson_plan", "")
 
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     c = canvas.Canvas(temp_file.name, pagesize=letter)
-
     width, height = letter
     y = height - 50
 
     c.setFont("Helvetica", 12)
     lines = content.split("\n")
-
     text_obj = c.beginText(50, y)
     text_obj.setFont("Helvetica", 12)
 
@@ -119,3 +116,7 @@ def download_lessonplan_pdf():
     c.drawText(text_obj)
     c.save()
     return send_file(temp_file.name, as_attachment=True, download_name="lesson_plan.pdf")
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
